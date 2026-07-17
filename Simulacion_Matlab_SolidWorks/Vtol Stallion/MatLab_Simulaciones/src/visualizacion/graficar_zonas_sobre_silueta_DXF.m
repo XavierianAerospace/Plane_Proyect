@@ -1,42 +1,48 @@
 function graficar_zonas_sobre_silueta_DXF(geom2D, resPartesDXF, cfgDXF)
 %GRAFICAR_ZONAS_SOBRE_SILUETA_DXF
-% Grafica la silueta general del avion y las partes importadas desde DXF.
+% Grafica SOLO las piezas DXF separadas.
 %
 % Version corregida:
-%   - Sin textos dentro de la grafica.
-%   - Sin nombres ni areas sobre las piezas.
-%   - Las piezas DXF separadas se giran 180 grados visualmente.
-%   - La informacion detallada queda en la tabla visual y en el CSV.
+%   - Dibuja lineas finas reales del DXF.
+%   - Rellena areas cerradas con color transparente.
+%   - No usa boundary para dibujar.
+%   - No usa convhull para dibujar.
+%   - No usa lineas gruesas.
+%   - No dibuja silueta gris.
+%
+% Logica:
+%   1. Extrae entidades reales del DXF: lineas, arcos, splines, circulos.
+%   2. Une segmentos por sus extremos.
+%   3. Solo rellena si logra formar un contorno cerrado real.
+%   4. Dibuja encima las lineas finas del DXF.
 
-figure('Name','Partes DXF sobre silueta general','Color','w');
+figure('Name','Partes DXF separadas con area transparente','Color','w');
 hold on;
 grid on;
 axis equal;
 
 %% ============================================================
-% 1. Centro visual de referencia para girar partes 180 grados
+% 1. Configuracion visual
 % ============================================================
 
 centroVisual_m = calcular_centro_visual_geom(geom2D, cfgDXF);
 
-% Esta bandera gira SOLO las areas/partes DXF separadas.
-% La silueta general se deja como referencia.
+% Mantener el giro que ya te quedo bien.
 girarPartesDXF180 = true;
 
-%% ============================================================
-% 2. Dibujar silueta/base general
-% ============================================================
+% FaceAlpha:
+%   0.40 significa 40% opaco y 60% transparente.
+alphaRelleno = 0.40;
 
-colorBase = [0.75 0.75 0.75];
+% Lineas finas
+anchoLinea = 1.4;
 
-dibujar_geometria_base(geom2D, cfgDXF, colorBase);
-
-%% ============================================================
-% 3. Dibujar partes DXF separadas
-% ============================================================
+% Tolerancia para unir extremos de segmentos.
+% 1e-3 m = 1 mm.
+tolLoop_m = 1e-3;
 
 if ~isfield(resPartesDXF, 'partes') || isempty(resPartesDXF.partes)
-    title('Silueta DXF sin partes importadas');
+    title('No hay partes DXF importadas');
     xlabel('y lateral [mm]');
     ylabel('x longitudinal [mm]');
     hold off;
@@ -46,6 +52,10 @@ end
 partes = resPartesDXF.partes;
 colores = lines(max(numel(partes), 8));
 
+%% ============================================================
+% 2. Dibujar cada pieza
+% ============================================================
+
 for i = 1:numel(partes)
 
     if isfield(partes(i), 'detectada')
@@ -54,30 +64,34 @@ for i = 1:numel(partes)
         end
     end
 
-    P = obtener_contorno_parte(partes(i));
+    colorParte = colores(i,:);
 
-    if isempty(P) || size(P,1) < 3
-        continue;
+    if isfield(partes(i), 'geom2D') && ~isempty(partes(i).geom2D)
+
+        dibujar_parte_con_relleno_real( ...
+            partes(i).geom2D, ...
+            cfgDXF, ...
+            colorParte, ...
+            alphaRelleno, ...
+            anchoLinea, ...
+            girarPartesDXF180, ...
+            centroVisual_m, ...
+            tolLoop_m);
+
+    else
+        % Respaldo sin relleno artificial
+        dibujar_respaldo_linea_fina( ...
+            partes(i), ...
+            cfgDXF, ...
+            colorParte, ...
+            anchoLinea, ...
+            girarPartesDXF180, ...
+            centroVisual_m);
     end
-
-    % Transformar a vista normal
-    Pvis = transformar_a_vista(P, cfgDXF);
-
-    % Girar SOLO las partes DXF separadas 180 grados
-    if girarPartesDXF180
-        Pvis = rotar_180_respecto_centro(Pvis, centroVisual_m);
-    end
-
-    Pvis_mm = 1000 * Pvis;
-
-    patch(Pvis_mm(:,1), Pvis_mm(:,2), colores(i,:), ...
-        'FaceAlpha', 0.35, ...
-        'EdgeColor', colores(i,:), ...
-        'LineWidth', 1.6);
 end
 
 %% ============================================================
-% 4. Formato de grafica
+% 3. Formato
 % ============================================================
 
 if isfield(cfgDXF,'rotarVistaPuntaArriba') && cfgDXF.rotarVistaPuntaArriba
@@ -88,106 +102,312 @@ else
     ylabel('y lateral [mm]');
 end
 
-title('Partes DXF sobre silueta general');
+title('Partes DXF separadas con area transparente');
 
-% No poner legend ni textos internos, porque la informacion va en la tabla.
 hold off;
 
 end
 
 
 %% ============================================================
-function dibujar_geometria_base(geom2D, cfgDXF, colorBase)
-%DIBUJAR_GEOMETRIA_BASE Dibuja lineas, arcos, splines y circulos.
+function dibujar_parte_con_relleno_real(geom, cfgDXF, colorParte, alphaRelleno, anchoLinea, girar180, centroVisual_m, tolLoop_m)
+%DIBUJAR_PARTE_CON_RELLENO_REAL
+% Dibuja una parte:
+%   1. Rellena loops cerrados reales.
+%   2. Dibuja encima las entidades reales con linea fina.
 
-% Lineas
-if isfield(geom2D, 'lines')
-    for i = 1:numel(geom2D.lines)
+segmentos = extraer_segmentos_geom2D(geom);
 
-        p1 = transformar_a_vista(geom2D.lines(i).p1, cfgDXF);
-        p2 = transformar_a_vista(geom2D.lines(i).p2, cfgDXF);
+if isempty(segmentos)
+    return;
+end
 
-        p1 = 1000 * p1;
-        p2 = 1000 * p2;
+% Reconstruir loops cerrados reales desde segmentos
+loops = construir_loops_cerrados(segmentos, tolLoop_m);
 
-        plot([p1(1) p2(1)], [p1(2) p2(2)], ...
-            '-', 'Color', colorBase, 'LineWidth', 0.7);
+% 1. Rellenar areas cerradas reales
+for k = 1:numel(loops)
+
+    P = loops{k};
+
+    if isempty(P) || size(P,1) < 3
+        continue;
+    end
+
+    areaLoop = abs(polyarea(P(:,1), P(:,2)));
+
+    % Evitar rellenos degenerados
+    if areaLoop < 1e-10
+        continue;
+    end
+
+    Pmm = preparar_puntos(P, cfgDXF, girar180, centroVisual_m);
+
+    patch(Pmm(:,1), Pmm(:,2), colorParte, ...
+        'FaceAlpha', alphaRelleno, ...
+        'EdgeColor', 'none');
+end
+
+% 2. Dibujar lineas reales encima, finas
+for k = 1:numel(segmentos)
+
+    P = segmentos{k};
+
+    if isempty(P) || size(P,1) < 2
+        continue;
+    end
+
+    Pmm = preparar_puntos(P, cfgDXF, girar180, centroVisual_m);
+
+    plot(Pmm(:,1), Pmm(:,2), ...
+        '-', ...
+        'Color', colorParte, ...
+        'LineWidth', anchoLinea);
+end
+
+end
+
+
+%% ============================================================
+function segmentos = extraer_segmentos_geom2D(geom)
+%EXTRAER_SEGMENTOS_GEOM2D Extrae segmentos ordenados de entidades reales.
+%
+% Cada celda de segmentos contiene un conjunto de puntos ordenados:
+%   segmento{k} = [x y; x y; ...]
+
+segmentos = {};
+
+%% Lineas
+if isfield(geom, 'lines')
+    for k = 1:numel(geom.lines)
+
+        P = [
+            geom.lines(k).p1
+            geom.lines(k).p2
+        ];
+
+        segmentos{end+1} = P; %#ok<AGROW>
     end
 end
 
-% Polilineas
-if isfield(geom2D, 'polylines')
-    for i = 1:numel(geom2D.polylines)
+%% Polilineas
+if isfield(geom, 'polylines')
+    for k = 1:numel(geom.polylines)
 
-        P = geom2D.polylines(i).points;
+        P = geom.polylines(k).points;
 
-        if isempty(P)
+        if isempty(P) || size(P,1) < 2
             continue;
         end
 
-        if isfield(geom2D.polylines(i), 'closed') && geom2D.polylines(i).closed
+        if isfield(geom.polylines(k), 'closed') && geom.polylines(k).closed
+            if norm(P(1,:) - P(end,:)) > 1e-12
+                P = [P; P(1,:)];
+            end
+        end
+
+        segmentos{end+1} = P; %#ok<AGROW>
+    end
+end
+
+%% Arcos
+if isfield(geom, 'arcs')
+    for k = 1:numel(geom.arcs)
+
+        P = geom.arcs(k).points;
+
+        if isempty(P) || size(P,1) < 2
+            continue;
+        end
+
+        segmentos{end+1} = P; %#ok<AGROW>
+    end
+end
+
+%% Splines
+if isfield(geom, 'splines')
+    for k = 1:numel(geom.splines)
+
+        P = geom.splines(k).points;
+
+        if isempty(P) || size(P,1) < 2
+            continue;
+        end
+
+        segmentos{end+1} = P; %#ok<AGROW>
+    end
+end
+
+%% Circulos
+if isfield(geom, 'circles')
+    for k = 1:numel(geom.circles)
+
+        c = geom.circles(k).center;
+        r = geom.circles(k).radius;
+
+        th = linspace(0, 2*pi, 180)';
+
+        P = [
+            c(1) + r*cos(th), ...
+            c(2) + r*sin(th)
+        ];
+
+        segmentos{end+1} = P; %#ok<AGROW>
+    end
+end
+
+%% Rectangulos detectados
+% Usar rectangulos solo si no hay suficientes entidades reales.
+% Esto evita duplicar rectangulos que ya vienen como LINE.
+if isempty(segmentos) && isfield(geom, 'rectangulos')
+    for k = 1:numel(geom.rectangulos)
+
+        if ~isfield(geom.rectangulos(k), 'vertices')
+            continue;
+        end
+
+        P = geom.rectangulos(k).vertices;
+
+        if isempty(P) || size(P,1) < 3
+            continue;
+        end
+
+        if norm(P(1,:) - P(end,:)) > 1e-12
             P = [P; P(1,:)];
         end
 
-        P = transformar_a_vista(P, cfgDXF);
-        P = 1000 * P;
-
-        plot(P(:,1), P(:,2), ...
-            '-', 'Color', colorBase, 'LineWidth', 0.7);
+        segmentos{end+1} = P; %#ok<AGROW>
     end
 end
 
-% Arcos
-if isfield(geom2D, 'arcs')
-    for i = 1:numel(geom2D.arcs)
+% Limpiar segmentos no validos
+segmentosLimpios = {};
 
-        P = geom2D.arcs(i).points;
+for k = 1:numel(segmentos)
 
-        if isempty(P)
-            continue;
+    P = segmentos{k};
+
+    if isempty(P) || size(P,1) < 2
+        continue;
+    end
+
+    P = P(all(isfinite(P),2),:);
+
+    if size(P,1) < 2
+        continue;
+    end
+
+    if norm(P(1,:) - P(end,:)) < 1e-12 && size(P,1) == 2
+        continue;
+    end
+
+    segmentosLimpios{end+1} = P; %#ok<AGROW>
+end
+
+segmentos = segmentosLimpios;
+
+end
+
+
+%% ============================================================
+function loops = construir_loops_cerrados(segmentos, tol)
+%CONSTRUIR_LOOPS_CERRADOS Une segmentos por extremos.
+%
+% Importante:
+%   Solo crea relleno si el contorno realmente cierra.
+%   No inventa contornos con boundary ni convhull.
+
+loops = {};
+
+n = numel(segmentos);
+
+if n == 0
+    return;
+end
+
+usado = false(n,1);
+
+%% 1. Primero guardar segmentos que ya vienen cerrados
+for i = 1:n
+
+    P = segmentos{i};
+
+    if isempty(P) || size(P,1) < 3
+        continue;
+    end
+
+    if distancia(P(1,:), P(end,:)) <= tol
+        loops{end+1} = cerrar_loop(P); %#ok<AGROW>
+        usado(i) = true;
+    end
+end
+
+%% 2. Construir loops conectando segmentos abiertos
+for i = 1:n
+
+    if usado(i)
+        continue;
+    end
+
+    loop = segmentos{i};
+    usado(i) = true;
+
+    cambio = true;
+
+    while cambio
+        cambio = false;
+
+        inicio = loop(1,:);
+        fin = loop(end,:);
+
+        % Intentar conectar al final
+        for j = 1:n
+
+            if usado(j)
+                continue;
+            end
+
+            S = segmentos{j};
+
+            if isempty(S) || size(S,1) < 2
+                continue;
+            end
+
+            sIni = S(1,:);
+            sFin = S(end,:);
+
+            if distancia(fin, sIni) <= tol
+                loop = [loop; S(2:end,:)]; %#ok<AGROW>
+                usado(j) = true;
+                cambio = true;
+                break;
+
+            elseif distancia(fin, sFin) <= tol
+                S = flipud(S);
+                loop = [loop; S(2:end,:)]; %#ok<AGROW>
+                usado(j) = true;
+                cambio = true;
+                break;
+
+            elseif distancia(inicio, sFin) <= tol
+                loop = [S(1:end-1,:); loop]; %#ok<AGROW>
+                usado(j) = true;
+                cambio = true;
+                break;
+
+            elseif distancia(inicio, sIni) <= tol
+                S = flipud(S);
+                loop = [S(1:end-1,:); loop]; %#ok<AGROW>
+                usado(j) = true;
+                cambio = true;
+                break;
+            end
         end
-
-        P = transformar_a_vista(P, cfgDXF);
-        P = 1000 * P;
-
-        plot(P(:,1), P(:,2), ...
-            '-', 'Color', colorBase, 'LineWidth', 0.7);
     end
-end
 
-% Splines
-if isfield(geom2D, 'splines')
-    for i = 1:numel(geom2D.splines)
-
-        P = geom2D.splines(i).points;
-
-        if isempty(P)
-            continue;
-        end
-
-        P = transformar_a_vista(P, cfgDXF);
-        P = 1000 * P;
-
-        plot(P(:,1), P(:,2), ...
-            '-', 'Color', colorBase, 'LineWidth', 0.9);
-    end
-end
-
-% Circulos
-if isfield(geom2D, 'circles')
-    for i = 1:numel(geom2D.circles)
-
-        c = geom2D.circles(i).center;
-        r = geom2D.circles(i).radius;
-
-        th = linspace(0, 2*pi, 120)';
-        P = [c(1) + r*cos(th), c(2) + r*sin(th)];
-
-        P = transformar_a_vista(P, cfgDXF);
-        P = 1000 * P;
-
-        plot(P(:,1), P(:,2), ...
-            '-', 'Color', colorBase, 'LineWidth', 0.7);
+    % Revisar si el loop cerro
+    if size(loop,1) >= 3 && distancia(loop(1,:), loop(end,:)) <= tol
+        loops{end+1} = cerrar_loop(loop); %#ok<AGROW>
     end
 end
 
@@ -195,72 +415,79 @@ end
 
 
 %% ============================================================
-function P = obtener_contorno_parte(parte)
-%OBTENER_CONTORNO_PARTE Devuelve contorno de la parte en metros.
+function P = cerrar_loop(P)
+%CERRAR_LOOP Asegura que el primer y ultimo punto sean iguales.
+
+if isempty(P)
+    return;
+end
+
+if norm(P(1,:) - P(end,:)) > 1e-12
+    P = [P; P(1,:)];
+end
+
+end
+
+
+%% ============================================================
+function d = distancia(a, b)
+%DISTANCIA Distancia euclidiana entre dos puntos 2D.
+
+d = sqrt(sum((a - b).^2));
+
+end
+
+
+%% ============================================================
+function dibujar_respaldo_linea_fina(parte, cfgDXF, colorParte, anchoLinea, girar180, centroVisual_m)
+%DIBUJAR_RESPALDO_LINEA_FINA Respaldo sin relleno artificial.
 
 P = zeros(0,2);
 
-% Caso 1: contorno ya calculado
-if isfield(parte, 'contorno_m')
-    if ~isempty(parte.contorno_m) && size(parte.contorno_m,1) >= 3
-        P = parte.contorno_m;
-        return;
-    end
+if isfield(parte, 'contorno_m') && ~isempty(parte.contorno_m)
+    P = parte.contorno_m;
+elseif isfield(parte, 'puntos_m') && ~isempty(parte.puntos_m)
+    P = parte.puntos_m;
 end
 
-% Caso 2: calcular contorno desde puntos
-if isfield(parte, 'puntos_m')
-    puntos = parte.puntos_m;
-
-    if ~isempty(puntos) && size(puntos,1) >= 3
-
-        puntos = puntos(all(isfinite(puntos),2),:);
-        puntos = unique(round(puntos/1e-6)*1e-6, 'rows');
-
-        if size(puntos,1) >= 3
-            x = puntos(:,1);
-            y = puntos(:,2);
-
-            try
-                k = boundary(x, y, 0.85);
-            catch
-                k = convhull(x, y);
-            end
-
-            P = [x(k), y(k)];
-            return;
-        end
-    end
+if isempty(P) || size(P,1) < 2
+    return;
 end
 
-% Caso 3: usar bounding box
-if isfield(parte,'x_min_mm') && isfield(parte,'x_max_mm') && ...
-   isfield(parte,'y_min_mm') && isfield(parte,'y_max_mm')
+P = P(all(isfinite(P),2),:);
 
-    vals = [parte.x_min_mm, parte.x_max_mm, parte.y_min_mm, parte.y_max_mm];
-
-    if all(isfinite(vals))
-        x1 = parte.x_min_mm / 1000;
-        x2 = parte.x_max_mm / 1000;
-        y1 = parte.y_min_mm / 1000;
-        y2 = parte.y_max_mm / 1000;
-
-        P = [
-            x1 y1
-            x2 y1
-            x2 y2
-            x1 y2
-            x1 y1
-        ];
-    end
+if isempty(P) || size(P,1) < 2
+    return;
 end
+
+Pmm = preparar_puntos(P, cfgDXF, girar180, centroVisual_m);
+
+plot(Pmm(:,1), Pmm(:,2), ...
+    '-', ...
+    'Color', colorParte, ...
+    'LineWidth', anchoLinea);
+
+end
+
+
+%% ============================================================
+function Pmm = preparar_puntos(P, cfgDXF, girar180, centroVisual_m)
+%PREPARAR_PUNTOS Convierte coordenadas internas a vista en mm.
+
+Pvis = transformar_a_vista(P, cfgDXF);
+
+if girar180
+    Pvis = rotar_180_respecto_centro(Pvis, centroVisual_m);
+end
+
+Pmm = 1000 * Pvis;
 
 end
 
 
 %% ============================================================
 function Pvis = transformar_a_vista(P, cfgDXF)
-%TRANSFORMAR_A_VISTA Convierte coordenadas internas a coordenadas visuales.
+%TRANSFORMAR_A_VISTA
 %
 % Sistema interno:
 %   x = longitudinal
@@ -294,9 +521,6 @@ end
 %% ============================================================
 function Pout = rotar_180_respecto_centro(Pin, centro)
 %ROTAR_180_RESPECTO_CENTRO Gira puntos 180 grados alrededor de un centro.
-%
-% Formula:
-%   Pout = 2*centro - Pin
 
 if isempty(Pin)
     Pout = Pin;
@@ -310,7 +534,7 @@ end
 
 %% ============================================================
 function centroVisual_m = calcular_centro_visual_geom(geom2D, cfgDXF)
-%CALCULAR_CENTRO_VISUAL_GEOM Calcula centro visual de la silueta general.
+%CALCULAR_CENTRO_VISUAL_GEOM Calcula centro visual usando el DXF general.
 
 P = extraer_puntos_geom2D(geom2D);
 
@@ -369,8 +593,11 @@ if isfield(geom2D, 'circles')
         c = geom2D.circles(i).center;
         r = geom2D.circles(i).radius;
 
-        th = linspace(0, 2*pi, 80)';
-        Pc = [c(1) + r*cos(th), c(2) + r*sin(th)];
+        th = linspace(0, 2*pi, 100)';
+        Pc = [
+            c(1) + r*cos(th), ...
+            c(2) + r*sin(th)
+        ];
 
         P = [P; Pc]; %#ok<AGROW>
     end

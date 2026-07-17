@@ -208,6 +208,20 @@ mostrar_tabla_partes_vtol(tablaMaestraVTOL);
 fprintf('Tabla visual generada.\n\n');
 
 %% ============================================================
+% 12. CALCULAR MASA Y CENTRO DE GRAVEDAD
+% ============================================================
+
+fprintf('Calculando masa total y centro de gravedad...\n');
+
+resMasaCG = calcular_masa_CG_vtol(tablaMaestraVTOL);
+
+imprimir_resumen_masa_CG_vtol(resMasaCG);
+
+graficar_masa_CG_vtol(resMasaCG, geom2D, cfgDXF);
+
+fprintf('Calculo de masa y CG finalizado.\n\n');
+
+%% ============================================================
 % 12. GUARDAR RESULTADOS MATLAB
 % ============================================================
 
