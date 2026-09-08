@@ -1,5 +1,13 @@
+<<<<<<< HEAD
 <?xml version="1.0" encoding="utf-8"?>
 <configuration_data>
 	<version>1</version>
 	<geometry_version>4b40e4cc-c058-4c19-8878-98371c352077</geometry_version>
 </configuration_data>
+=======
+<?xml version="1.0" encoding="utf-8"?>
+<configuration_data>
+	<version>1</version>
+	<geometry_version>4b40e4cc-c058-4c19-8878-98371c352077</geometry_version>
+</configuration_data>
+>>>>>>> 76a0cb6d6472a70bf40c3318412519e762c80f9f

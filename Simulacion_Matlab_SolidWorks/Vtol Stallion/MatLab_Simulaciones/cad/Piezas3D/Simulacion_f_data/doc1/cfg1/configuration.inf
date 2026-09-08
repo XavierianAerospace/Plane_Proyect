@@ -1,6 +1,15 @@
+<<<<<<< HEAD
 <?xml version="1.0" encoding="utf-8"?>
 <project>
 	<version>1</version>
 	<name>Predeterminado</name>
 	<directory>cfg1</directory>
 </project>
+=======
+<?xml version="1.0" encoding="utf-8"?>
+<project>
+	<version>1</version>
+	<name>Predeterminado</name>
+	<directory>cfg1</directory>
+</project>
+>>>>>>> 76a0cb6d6472a70bf40c3318412519e762c80f9f
