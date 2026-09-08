@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project>
+	<version>1</version>
+	<name>S_AMQ</name>
+	<uuid>6b522492-72b7-4944-a612-5cdff9248cbc</uuid>
+	<directory>prj1</directory>
+	<vwr_res_files_dir>1</vwr_res_files_dir>
+	<geom_db_uuid>a780c0b7-690f-487b-9c6b-f380ff02a490</geom_db_uuid>
+	<gdb_light_uuid>d8b0cb65-99ff-4d3e-8dfd-1629cac99beb</gdb_light_uuid>
+	<model_geom_uuid/>
+	<template_id/>
+</project>
